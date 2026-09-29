@@ -1,0 +1,38 @@
+{
+    "object": "whatsapp_business_account",
+    "entry": [
+        {
+            "id": "1565265758043528",
+            "changes": [
+                {
+                    "field": "messages",
+                    "value": {
+                        "messaging_product": "whatsapp",
+                        "metadata": {
+                            "phone_number_id": "1012357111953765"
+                        },
+                        "contacts": [
+                            {
+                                "profile": {
+                                    "name": "Test"
+                                },
+                                "wa_id": "254706782300"
+                            }
+                        ],
+                        "messages": [
+                            {
+                                "from": "254706782300",
+                                "id": "wamid.test123",
+                                "timestamp": "1790597841",
+                                "type": "text",
+                                "text": {
+                                    "body": "hi, what services do you offer?"
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+    ]
+}
