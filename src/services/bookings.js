@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { business } from "./business.js";
+import { business } from "../config/business.js";
 import {
   nairobiNow,
   toMinutes,
@@ -10,7 +10,7 @@ import {
   isValidTime,
   dayOfWeek,
   formatDate,
-} from "../../utils/time.js";
+} from "../utils/time.js";
 
 // ---------------------------------------------------------------------
 // Storage: a single JSON file. Fine for a demo (survives restarts, zero
@@ -30,7 +30,7 @@ function load() {
 }
 
 function save(bookings) {
-  fs.mkdir(DATA_DIR, { recursive: true });
+  fs.mkdirSync(DATA_DIR, { recursive: true });
   fs.writeFileSync(FILE, JSON.stringify(bookings, null, 2));
 }
 

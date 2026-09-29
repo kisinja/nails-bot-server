@@ -1,9 +1,9 @@
-import { business } from "./business.js";
+import { business } from "../config/business.js";
 import {
   getAvailableSlots,
   createBooking,
   resolveServices,
-} from "../bookings.js";
+} from "./bookings.js";
 
 const serviceNames = business.services.map((s) => s.name);
 

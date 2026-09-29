@@ -75,9 +75,3 @@ state it back to the customer. Never accept a date in the past, and only
 book within opening hours (${business.hours}).
 `;
 }
-
-
-/* 
-$ curl -X POST "https://graph.facebook.com/v21.0/1565265758043528/subscribed_apps" -H "Authorization: Bearer EAAYL0vTA5uwBSrOZBlOnpa9OZBPrpXaRkIkqGmIMg9eF1RC79ZB5WFsKaLjy03EZCPZCOrUlCv6TL8KY6Nq4gLQ6DNlNM6na9ubeKGLwQlkGqZAsAsYugCiccDODzWAgxhxtc7JjkHVs1fE6YM2J7LXZBZAtgUM32FhYTl30JGdin7Ys8nInKrb0bCdEMJigCGnxVa5BY9gEwb69oUW01m88Em7OSJjgAnoDmPRF1jPDkRkyJCZBMd8REjd68SSiWRZAULTwsYFg2eYbIlmoD3vZAZCT7ncZD" -H "Content-Type: application/json" -d "{\"override_callback_uri\":\"https://376a-102-0-20-178.ngrok-free.app/webhook\",\"verify_token\":\"whatsoko_verify_2026\"}"
-
-*/
