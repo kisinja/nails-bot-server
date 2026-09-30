@@ -1,37 +1,11 @@
+// src/config/business.js
+// No more hardcoded business object -- config now lives in the
+// database (see prisma/schema.prisma + prisma/seed.js). This file's
+// only remaining job is turning a `business` row (with `.services`
+// included) into the system prompt text sent to Groq.
 import { nairobiNow, toHHMM, addDays, formatDate } from "../utils/time.js";
 
-// Hardcoded business info for the demo. Later this becomes a database
-// row per tenant, but for a single-business demo a plain object is fine.
-
-export const business = {
-  name: "Glow Nails & Cosmetics",
-  location: "Nairobi, Kenya",
-  hours: "Mon–Sat, 9am–7pm", // human-readable, shown to the model
-
-  // Machine-readable schedule, used by the booking logic
-  openDays: [1, 2, 3, 4, 5, 6], // 0 = Sunday ... 6 = Saturday
-  openTime: "09:00",
-  closeTime: "19:00",
-  slotStepMinutes: 60, // appointment start times offered every hour
-  minNoticeMinutes: 60, // can't book a slot starting sooner than this
-  technicians: 2, // how many appointments can run at the same time
-  houseCallBufferMinutes: 45, // extra time a house call blocks a tech (travel)
-  holdMinutes: 30, // how long an unpaid booking holds its slot
-
-  services: [
-    { name: "Gel manicure", price: 1500, durationMinutes: 60 },
-    { name: "Acrylic full set", price: 2500, durationMinutes: 90 },
-    { name: "Classic pedicure", price: 1200, durationMinutes: 60 },
-    { name: "Nail art (add-on)", price: 500, durationMinutes: 30 },
-    { name: "Lash extensions", price: 2000, durationMinutes: 90 },
-  ],
-  houseCallFee: 1000,
-  currency: "KES",
-};
-
-// This gets stitched into the system prompt sent to Groq, so the bot
-// always answers with real business info instead of guessing.
-export function buildSystemPrompt() {
+export function buildSystemPrompt(business) {
   const now = nairobiNow();
   const today = now.date;
 
@@ -50,22 +24,21 @@ export function buildSystemPrompt() {
     return `- ${formatDate(date)} = ${date}${tag}`;
   }).join("\n");
 
-  return `You are the WhatsApp assistant for ${business.name}, a nail and
-beauty business in ${business.location}. You help customers book
-appointments, answer questions, and guide them toward payment. You are
-friendly, warm, and efficient — like a helpful front-desk person, not a
-generic chatbot.
+  return `You are the WhatsApp assistant for ${business.name}, a business in
+${business.location}. You help customers book appointments, answer
+questions, and guide them toward payment. You are friendly, warm, and
+efficient — like a helpful front-desk person, not a generic chatbot.
 
 BUSINESS INFO
 - Services, prices and durations:
 ${serviceList}
 - House call add-on fee: ${business.currency} ${business.houseCallFee}
 - Hours: ${business.hours}
-- Two booking types: on-site (client visits the salon) or house call
-  (a nail tech travels to the client's home)
+- Two booking types: on-site (client visits the business) or house call
+  (someone travels to the client's location)
 - Always write prices as ${business.currency}.
 
-CURRENT DATE AND TIME: ${formatDate(today)}, ${toHHMM(now.minutes)} Nairobi time.
+CURRENT DATE AND TIME: ${formatDate(today)}, ${toHHMM(now.minutes)} ${business.timezone} time.
 Calendar for the next 14 days (use this to convert "tomorrow",
 "Saturday", "next Friday" into exact dates, and state the date back to
 the customer):
@@ -97,8 +70,8 @@ RULES
   human follow up.
 
 TONE
-Warm, concise, WhatsApp-casual. Light emoji sparingly (💅 ✨), not in
-every message. Keep messages short.
+Warm, concise, WhatsApp-casual. Light emoji sparingly, not in every
+message. Keep messages short.
 Format for WhatsApp: never use markdown tables, headers, or pipes. For
 lists, use short lines like "Gel manicure - KES 1,500". Use *single
 asterisks* for bold, not double.

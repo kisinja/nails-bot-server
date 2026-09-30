@@ -2,7 +2,7 @@ import "dotenv/config";
 import express from "express";
 import morgan from "morgan";
 import webhookRouter from "./routes/webhook.js";
-import fs from "node:fs";
+import { prisma } from "./db.js";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -12,22 +12,31 @@ app.use(morgan("combined"));
 app.use(webhookRouter);
 
 app.get("/health", (req, res) => {
-  res.send("OK").status(200);
+  res.status(200).send("OK");
 });
 
 app.get("/", (req, res) => {
-  res.send("Glow Nails WhatsApp bot server is running.");
+  res.send("ELJIKA AI multi-tenant WhatsApp bot server is running.");
 });
 
-app.get("/admin/bookings", (req, res) => {
+// Now requires a businessId, since bookings are tenant-scoped.
+// e.g. /admin/bookings?key=...&businessId=glow-nails-seed
+app.get("/admin/bookings", async (req, res) => {
   if (req.query.key !== process.env.ADMIN_KEY) {
     return res.sendStatus(403);
   }
+  if (!req.query.businessId) {
+    return res.status(400).json({ error: "businessId query param required" });
+  }
   try {
-    const data = fs.readFileSync("data/bookings.json", "utf-8");
-    res.type("json").send(data);
-  } catch {
-    res.json([]);
+    const bookings = await prisma.booking.findMany({
+      where: { businessId: req.query.businessId },
+      orderBy: { createdAt: "desc" },
+    });
+    res.json(bookings);
+  } catch (error) {
+    console.error("Failed to load bookings:", error);
+    res.status(500).json({ error: "Failed to load bookings" });
   }
 });
 

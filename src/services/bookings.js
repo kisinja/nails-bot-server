@@ -1,7 +1,8 @@
-import fs from "node:fs";
-import path from "node:path";
-import { randomUUID } from "node:crypto";
-import { business } from "../config/business.js";
+// src/services/bookings.js
+// All booking storage is now Prisma/Postgres, and every query is
+// scoped by businessId. Nothing here trusts a global "the business" --
+// it's always passed in by the caller.
+import { prisma } from "../db.js";
 import {
   nairobiNow,
   toMinutes,
@@ -11,28 +12,6 @@ import {
   dayOfWeek,
   formatDate,
 } from "../utils/time.js";
-
-// ---------------------------------------------------------------------
-// Storage: a single JSON file. Fine for a demo (survives restarts, zero
-// setup). Node runs this code one call at a time, so read-check-write
-// below can't race. When you go multi-tenant, swap load()/save() for a
-// real database and keep everything else the same.
-// ---------------------------------------------------------------------
-const DATA_DIR = process.env.DATA_DIR || path.resolve("data");
-const FILE = path.join(DATA_DIR, "bookings.json");
-
-function load() {
-  try {
-    return JSON.parse(fs.readFileSync(FILE, "utf-8"));
-  } catch {
-    return [];
-  }
-}
-
-function save(bookings) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(FILE, JSON.stringify(bookings, null, 2));
-}
 
 // A booking blocks its slot if it's paid, or if it's unpaid but its
 // hold hasn't expired yet.
@@ -46,7 +25,7 @@ function isActive(booking, nowMs = Date.now()) {
 
 // How long a booking occupies a technician. House calls also block
 // travel time.
-function occupiedMinutes(durationMinutes, type) {
+function occupiedMinutes(durationMinutes, type, business) {
   return (
     durationMinutes +
     (type === "house_call" ? business.houseCallBufferMinutes : 0)
@@ -54,9 +33,9 @@ function occupiedMinutes(durationMinutes, type) {
 }
 
 // ---------------------------------------------------------------------
-// Services
+// Services (business.services comes from Prisma's `include: { services: true }`)
 // ---------------------------------------------------------------------
-export function resolveServices(names) {
+export function resolveServices(business, names) {
   const found = [];
   const unknown = [];
   for (const raw of names || []) {
@@ -66,7 +45,7 @@ export function resolveServices(names) {
       business.services.find((s) => s.name.toLowerCase().includes(wanted)) ||
       business.services.find((s) => wanted.includes(s.name.toLowerCase()));
     if (match) {
-      if (!found.includes(match)) found.push(match);
+      if (!found.some((f) => f.id === match.id)) found.push(match);
     } else {
       unknown.push(raw);
     }
@@ -74,7 +53,7 @@ export function resolveServices(names) {
   return { found, unknown };
 }
 
-function totals(services, type) {
+function totals(business, services, type) {
   const durationMinutes = services.reduce(
     (sum, s) => sum + s.durationMinutes,
     0,
@@ -86,9 +65,14 @@ function totals(services, type) {
 }
 
 // ---------------------------------------------------------------------
-// Availability
+// Availability -- business-scoped
 // ---------------------------------------------------------------------
-export function getAvailableSlots({ date, durationMinutes, type }) {
+export async function getAvailableSlots({
+  business,
+  date,
+  durationMinutes,
+  type,
+}) {
   if (!isValidDate(date)) {
     return { ok: false, error: "Invalid date. Use YYYY-MM-DD." };
   }
@@ -105,26 +89,29 @@ export function getAvailableSlots({ date, durationMinutes, type }) {
 
   const open = toMinutes(business.openTime);
   const close = toMinutes(business.closeTime);
-  const blockLength = occupiedMinutes(durationMinutes, type);
-  const active = load().filter((b) => b.date === date && isActive(b));
-  const slots = [];
+  const blockLength = occupiedMinutes(durationMinutes, type, business);
 
+  // Scoped by businessId -- Glow Nails' bookings never affect another
+  // tenant's availability, and vice versa.
+  const candidates = await prisma.booking.findMany({
+    where: { businessId: business.id, date },
+  });
+  const active = candidates.filter((b) => isActive(b));
+
+  const slots = [];
   for (
     let start = open;
     start + durationMinutes <= close;
     start += business.slotStepMinutes
   ) {
-    // Too soon (only matters for today)
     if (date === now.date && start < now.minutes + business.minNoticeMinutes)
       continue;
 
-    // Count existing bookings that overlap this candidate. If every
-    // technician is already tied up, the slot is unavailable. This is
-    // deliberately conservative: it never double-books.
     const end = start + blockLength;
     const overlapping = active.filter((b) => {
       const bStart = toMinutes(b.time);
-      const bEnd = bStart + occupiedMinutes(b.durationMinutes, b.type);
+      const bEnd =
+        bStart + occupiedMinutes(b.durationMinutes, b.type, business);
       return bStart < end && start < bEnd;
     }).length;
 
@@ -135,9 +122,11 @@ export function getAvailableSlots({ date, durationMinutes, type }) {
 }
 
 // ---------------------------------------------------------------------
-// Create / confirm / look up
+// Create / confirm / look up -- all business-scoped
 // ---------------------------------------------------------------------
-export function createBooking({
+export async function createBooking({
+  business,
+  customerId,
   phone,
   name,
   serviceNames,
@@ -159,7 +148,7 @@ export function createBooking({
     return { ok: false, error: "Invalid time. Use 24-hour HH:MM." };
   }
 
-  const { found, unknown } = resolveServices(serviceNames);
+  const { found, unknown } = resolveServices(business, serviceNames);
   if (unknown.length || !found.length) {
     return {
       ok: false,
@@ -169,10 +158,15 @@ export function createBooking({
     };
   }
 
-  const { durationMinutes, price } = totals(found, type);
+  const { durationMinutes, price } = totals(business, found, type);
 
   // Re-check availability right now: never trust an earlier check.
-  const availability = getAvailableSlots({ date, durationMinutes, type });
+  const availability = await getAvailableSlots({
+    business,
+    date,
+    durationMinutes,
+    type,
+  });
   if (!availability.ok) return availability;
   if (!availability.open) {
     return { ok: false, error: `We're closed on ${availability.weekday}.` };
@@ -185,64 +179,64 @@ export function createBooking({
     };
   }
 
-  const bookings = load();
-  const now = Date.now();
+  // If this customer already has an unpaid hold with this business,
+  // replace it instead of leaving a ghost. Scoped by businessId +
+  // customerId, so a hold with a different business is untouched.
+  await prisma.booking.updateMany({
+    where: {
+      businessId: business.id,
+      customerId,
+      status: "pending_payment",
+      holdExpiresAt: { gt: new Date() },
+    },
+    data: { status: "cancelled" },
+  });
 
-  // If this customer already has an unpaid hold (e.g. they changed
-  // their mind about the time), replace it instead of leaving a ghost.
-  for (const b of bookings) {
-    if (
-      b.phone === phone &&
-      b.status === "pending_payment" &&
-      isActive(b, now)
-    ) {
-      b.status = "cancelled";
-    }
-  }
+  const booking = await prisma.booking.create({
+    data: {
+      businessId: business.id,
+      customerId,
+      name: String(name || "").trim() || "Customer",
+      services: found.map((s) => s.name),
+      type,
+      address: type === "house_call" ? String(address).trim() : null,
+      date,
+      time,
+      durationMinutes,
+      totalPrice: price,
+      currency: business.currency,
+      status: "pending_payment",
+      holdExpiresAt: new Date(Date.now() + business.holdMinutes * 60 * 1000),
+    },
+  });
 
-  const booking = {
-    id: `BK-${randomUUID().slice(0, 6).toUpperCase()}`,
-    phone,
-    name: String(name || "").trim() || "Customer",
-    services: found.map((s) => s.name),
-    type,
-    address: type === "house_call" ? String(address).trim() : null,
-    date,
-    time,
-    durationMinutes,
-    totalPrice: price,
-    currency: business.currency,
-    status: "pending_payment",
-    holdExpiresAt: new Date(
-      now + business.holdMinutes * 60 * 1000,
-    ).toISOString(),
-    createdAt: new Date(now).toISOString(),
-  };
-
-  bookings.push(booking);
-  save(bookings);
   return { ok: true, booking };
 }
 
-export function getBooking(id) {
-  return load().find((b) => b.id === id) || null;
+export async function getBooking({ businessId, bookingId }) {
+  return prisma.booking.findFirst({ where: { id: bookingId, businessId } });
 }
 
 // Called by the payment step (IntaSend webhook) once money is received.
-export function confirmBooking(id) {
-  const bookings = load();
-  const booking = bookings.find((b) => b.id === id);
+export async function confirmBooking({ businessId, bookingId }) {
+  const booking = await prisma.booking.findFirst({
+    where: { id: bookingId, businessId },
+  });
   if (!booking) return { ok: false, error: "Booking not found." };
   if (booking.status === "confirmed") return { ok: true, booking };
   if (booking.status === "cancelled") {
     return { ok: false, error: "Booking was cancelled." };
   }
-  booking.status = "confirmed";
-  booking.confirmedAt = new Date().toISOString();
-  save(bookings);
-  return { ok: true, booking };
+  const updated = await prisma.booking.update({
+    where: { id: bookingId },
+    data: { status: "confirmed", confirmedAt: new Date() },
+  });
+  return { ok: true, booking: updated };
 }
 
-export function listBookingsForPhone(phone) {
-  return load().filter((b) => b.phone === phone && isActive(b));
+export async function listBookingsForPhone({ businessId, customerId }) {
+  const bookings = await prisma.booking.findMany({
+    where: { businessId, customerId },
+  });
+  return bookings.filter((b) => isActive(b));
 }

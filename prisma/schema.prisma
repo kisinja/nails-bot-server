@@ -1,0 +1,126 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Business {
+  id                     String   @id @default(cuid())
+  name                   String
+  location               String
+  currency               String   @default("KES")
+  timezone               String   @default("Africa/Nairobi")
+  hours                  String // human-readable, shown to the AI
+  openDays               Int[] // 0 = Sunday ... 6 = Saturday
+  openTime               String // "09:00"
+  closeTime              String // "19:00"
+  slotStepMinutes        Int      @default(60)
+  minNoticeMinutes       Int      @default(60)
+  technicians            Int      @default(1)
+  houseCallFee           Int      @default(0)
+  houseCallBufferMinutes Int      @default(0)
+  holdMinutes            Int      @default(30)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  services      Service[]
+  customers     Customer[]
+  conversations Conversation[]
+  bookings      Booking[]
+  whatsapp      WhatsAppAccount?
+}
+
+model WhatsAppAccount {
+  id            String   @id @default(cuid())
+  businessId    String   @unique
+  business      Business @relation(fields: [businessId], references: [id])
+  phoneNumberId String   @unique // Meta's phone_number_id -- this is how we resolve tenant from a webhook
+  accessToken   String // for MVP; move to a secrets manager before real scale
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model Service {
+  id              String   @id @default(cuid())
+  businessId      String
+  business        Business @relation(fields: [businessId], references: [id])
+  name            String
+  price           Int
+  durationMinutes Int
+  createdAt       DateTime @default(now())
+
+  @@unique([businessId, name])
+}
+
+model Customer {
+  id            String         @id @default(cuid())
+  businessId    String
+  business      Business       @relation(fields: [businessId], references: [id])
+  phone         String
+  name          String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  conversations Conversation[]
+  bookings      Booking[]
+
+  @@unique([businessId, phone])
+}
+
+model Conversation {
+  id         String   @id @default(cuid())
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id])
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id])
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  messages Message[]
+
+  @@unique([businessId, customerId])
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  role           String // "user" | "assistant" | "tool"
+  content        String
+  createdAt      DateTime     @default(now())
+}
+
+enum BookingStatus {
+  pending_payment
+  confirmed
+  cancelled
+}
+
+enum BookingType {
+  on_site
+  house_call
+}
+
+model Booking {
+  id              String        @id @default(cuid())
+  businessId      String
+  business        Business      @relation(fields: [businessId], references: [id])
+  customerId      String
+  customer        Customer      @relation(fields: [customerId], references: [id])
+  name            String
+  services        String[] // service names, denormalized for simplicity at this stage
+  type            BookingType
+  address         String?
+  date            String // "YYYY-MM-DD"
+  time            String // "HH:MM"
+  durationMinutes Int
+  totalPrice      Int
+  currency        String
+  status          BookingStatus @default(pending_payment)
+  holdExpiresAt   DateTime
+  createdAt       DateTime      @default(now())
+  confirmedAt     DateTime?
+
+  @@index([businessId, date])
+}

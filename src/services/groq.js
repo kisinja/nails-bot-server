@@ -1,33 +1,23 @@
+// src/services/groq.js
 import axios from "axios";
 import { buildSystemPrompt } from "../config/business.js";
-import { toolDefinitions, executeTool } from "./tools.js";
+import { buildToolDefinitions, executeTool } from "./tools.js";
+import {
+  getOrCreateCustomer,
+  getOrCreateConversation,
+  getConversationHistory,
+  appendMessage,
+} from "./customers.js";
 
-// Groq's API is OpenAI-compatible -- same request/response shape, just
-// a different base URL and model names.
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 
-// Very simple in-memory conversation history, keyed by customer phone
-// number. Fine for a demo; swap for a real database once you have more
-// than one conversation to track or need it to survive a restart.
-const conversationHistory = new Map();
-
-function getHistory(fromNumber) {
-  if (!conversationHistory.has(fromNumber)) {
-    conversationHistory.set(fromNumber, []);
-  }
-  return conversationHistory.get(fromNumber);
-}
-
-async function callGroq(messages) {
+async function callGroq(messages, tools) {
   const response = await axios.post(
     GROQ_API_URL,
     {
-      // Free-tier friendly, fast, and solid quality. Check
-      // console.groq.com/docs/models if this errors with "model not
-      // found" -- Groq's catalog changes fairly often.
       model: "openai/gpt-oss-20b",
       messages,
-      tools: toolDefinitions,
+      tools,
       tool_choice: "auto",
       temperature: 0.4,
     },
@@ -41,31 +31,38 @@ async function callGroq(messages) {
   return response.data.choices[0].message;
 }
 
-export async function getGroqReply(fromNumber, userMessage) {
-  const history = getHistory(fromNumber);
-  history.push({ role: "user", content: userMessage });
+// `business` here is the row resolved by resolveBusinessFromWebhook,
+// already including its services. Never trust a caller-supplied
+// businessId that skips that resolution step.
+export async function getGroqReply(business, fromNumber, userMessage) {
+  const customer = await getOrCreateCustomer(business.id, fromNumber);
+  const conversation = await getOrCreateConversation(business.id, customer.id);
 
-  // Keep the last several turns so the prompt doesn't grow forever.
-  // Tool-call exchanges aren't stored here -- they're resolved fully
-  // within this one request, below.
-  const trimmedHistory = history.slice(-16);
+  await appendMessage(conversation.id, "user", userMessage);
+
+  const history = await getConversationHistory(conversation.id, 16);
+  const tools = buildToolDefinitions(business);
 
   const messages = [
-    { role: "system", content: buildSystemPrompt() },
-    ...trimmedHistory,
+    { role: "system", content: buildSystemPrompt(business) },
+    ...history,
   ];
 
+  const ctx = {
+    business,
+    businessId: business.id,
+    customerId: customer.id,
+    phone: fromNumber,
+  };
+
   try {
-    // A tool round-trip is: model asks for a tool -> we run it for
-    // real -> feed the result back -> model either answers or asks
-    // for another tool. Cap it so a confused model can't loop forever.
     for (let round = 0; round < 4; round++) {
-      const message = await callGroq(messages);
+      const message = await callGroq(messages, tools);
 
       if (!message.tool_calls || message.tool_calls.length === 0) {
         const reply =
           message.content?.trim() || "Sorry, could you say that again?";
-        history.push({ role: "assistant", content: reply });
+        await appendMessage(conversation.id, "assistant", reply);
         return reply;
       }
 
@@ -83,10 +80,11 @@ export async function getGroqReply(fromNumber, userMessage) {
           args = {};
         }
 
-        console.log(`Tool call: ${call.function.name}`, args);
-        const result = executeTool(call.function.name, args, {
-          phone: fromNumber,
-        });
+        console.log(
+          `Tool call [${business.name}]: ${call.function.name}`,
+          args,
+        );
+        const result = await executeTool(call.function.name, args, ctx);
         console.log("Tool result:", result);
 
         messages.push({
@@ -98,7 +96,10 @@ export async function getGroqReply(fromNumber, userMessage) {
       // Loop again so the model can respond to the tool result(s).
     }
 
-    return "Sorry, I'm having trouble finishing that — someone from our team will follow up shortly.";
+    const fallback =
+      "Sorry, I'm having trouble finishing that — someone from our team will follow up shortly.";
+    await appendMessage(conversation.id, "assistant", fallback);
+    return fallback;
   } catch (error) {
     console.error("Groq API error:", error.response?.data || error.message);
     return "Sorry, I'm having a little trouble right now — someone from our team will follow up with you shortly.";

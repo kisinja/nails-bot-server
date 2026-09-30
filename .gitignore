@@ -4,3 +4,10 @@ node_modules/
 .vscode/
 
 script.txt
+
+.devin/
+.cursor/
+.claude/
+.agents/
+
+src/generated/

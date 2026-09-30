@@ -1,21 +1,18 @@
+// src/routes/webhook.js
 import { Router } from "express";
 import { getGroqReply } from "../services/groq.js";
 import { sendWhatsAppMessage } from "../services/whatsapp.js";
+import { resolveBusinessFromWebhook } from "../services/businesses.js";
 
 const router = Router();
 
 // Step 1: Meta calls this once, when you register the webhook URL in
-// the app dashboard, to confirm you control this endpoint.
+// the app dashboard, to confirm you control this endpoint. This is
+// app-level, not per-business, so the verify token stays a single env var.
 router.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
-
-  console.log("=== WEBHOOK VERIFICATION ===");
-  console.log("Mode:", mode);
-  console.log("Token received:", token);
-  console.log("Expected token:", process.env.WEBHOOK_VERIFY_TOKEN);
-  console.log("Challenge:", challenge);
 
   if (mode === "subscribe" && token === process.env.WEBHOOK_VERIFY_TOKEN) {
     console.log("Webhook verified successfully");
@@ -27,12 +24,10 @@ router.get("/webhook", (req, res) => {
 });
 
 // Step 2: Meta POSTs here every time a message (or status update)
-// happens on your number.
+// happens on ANY of your numbers, across ALL businesses.
 router.post("/webhook", async (req, res) => {
-  console.log("🔥 WEBHOOK POST RECEIVED");
-  console.log(JSON.stringify(req.body, null, 2));
   // Ack immediately -- Meta expects a fast 200, don't make it wait on
-  // the Groq call or it may retry/consider the webhook broken.
+  // tenant resolution or the Groq call.
   res.sendStatus(200);
 
   try {
@@ -41,9 +36,7 @@ router.post("/webhook", async (req, res) => {
     const message = change?.value?.messages?.[0];
 
     if (!message) {
-      // This POST was something else -- a delivery/read status update,
-      // not an incoming message. Nothing to do.
-      console.log("ℹ️ Webhook received, but no message found");
+      // Delivery/read status update, not an incoming message.
       return;
     }
 
@@ -55,24 +48,31 @@ router.post("/webhook", async (req, res) => {
       return;
     }
 
-    console.log(`Message from ${fromNumber}: ${messageText}`);
+    // This is the step that makes the whole system multi-tenant: figure
+    // out which business actually received this message, from the
+    // phone_number_id in the payload -- never assume "the" business.
+    const resolved = await resolveBusinessFromWebhook(req.body);
+    if (!resolved.ok) {
+      console.error("Could not resolve business for webhook:", resolved.error);
+      return;
+    }
+    const { business } = resolved;
 
-    const reply = await getGroqReply(fromNumber, messageText);
-    console.log(`Groq reply: ${reply}`);
+    console.log(
+      `Message from ${fromNumber} to ${business.name}: ${messageText}`,
+    );
 
-    await sendWhatsAppMessage(fromNumber, reply);
+    const reply = await getGroqReply(business, fromNumber, messageText);
+    console.log(`Groq reply [${business.name}]: ${reply}`);
+
+    await sendWhatsAppMessage({
+      businessId: business.id,
+      toNumber: fromNumber,
+      messageText: reply,
+    });
   } catch (error) {
     console.error("Error handling incoming webhook:", error);
   }
 });
 
 export default router;
-
-
-/* 
-
-  curl -X POST "https://graph.facebook.com/v21.0/1565265758043528/subscribed_apps" -H "Authorization: Bearer EAAYL0vTA5uwBSlkMU0ZBOxRJCknE3v1MtJ5Ue28jGlGuwjmLXZCMlNUiXCrhm6wI1DVjN9ob0AvOFWpAmJQ59PtYyMBcbt29kCCYlGsZBZAAeZAzHqp2pSN0AhMys5BGZA3MCxZAq3TSGprG7NJYolffYaCdYpu9H32eZC2y8JH28VabmeaxM0XvJbRvmFyyzqNWgWY3yPzrAc9mhMWRRUu20dMxLcXgHvA7USP6zGWHXXcWZCzLbUPjzDwm39ZCqJOqXpHbev18VLaIAgLDJ0mz3WrgZDZD"
-
-  curl -X POST "https://graph.facebook.com/v21.0/1565265758043528/subscribed_apps" -H "Authorization: Bearer EAAYL0vTA5uwBSlkMU0ZBOxRJCknE3v1MtJ5Ue28jGlGuwjmLXZCMlNUiXCrhm6wI1DVjN9ob0AvOFWpAmJQ59PtYyMBcbt29kCCYlGsZBZAAeZAzHqp2pSN0AhMys5BGZA3MCxZAq3TSGprG7NJYolffYaCdYpu9H32eZC2y8JH28VabmeaxM0XvJbRvmFyyzqNWgWY3yPzrAc9mhMWRRUu20dMxLcXgHvA7USP6zGWHXXcWZCzLbUPjzDwm39ZCqJOqXpHbev18VLaIAgLDJ0mz3WrgZDZD" -H "Content-Type: application/json" -d "{\"override_callback_uri\":\"https://376a-102-0-20-178.ngrok-free.app/webhook\",\"verify_token\":\"whatsoko_verify_2026\"}"
-
-*/

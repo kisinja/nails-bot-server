@@ -1,80 +1,89 @@
-import { business } from "../config/business.js";
+// src/services/tools.js
+// Tool schemas can no longer be built once at module load -- the valid
+// service names differ per business. buildToolDefinitions(business) is
+// called fresh for each request instead.
 import {
   getAvailableSlots,
   createBooking,
   resolveServices,
 } from "./bookings.js";
 
-const serviceNames = business.services.map((s) => s.name);
+export function buildToolDefinitions(business) {
+  const serviceNames = business.services.map((s) => s.name);
 
-// What the model is told it can do. It decides when to call these; our
-// code (executeTool below) does the real work against real data.
-export const toolDefinitions = [
-  {
-    type: "function",
-    function: {
-      name: "check_availability",
-      description:
-        "Get the free appointment start times for a given date. Always call this before offering or confirming a time. Only offer times returned here.",
-      parameters: {
-        type: "object",
-        properties: {
-          date: {
-            type: "string",
-            description: "Exact date as YYYY-MM-DD, taken from the calendar.",
+  return [
+    {
+      type: "function",
+      function: {
+        name: "check_availability",
+        description:
+          "Get the free appointment start times for a given date. Always call this before offering or confirming a time. Only offer times returned here.",
+        parameters: {
+          type: "object",
+          properties: {
+            date: {
+              type: "string",
+              description: "Exact date as YYYY-MM-DD, taken from the calendar.",
+            },
+            services: {
+              type: "array",
+              items: { type: "string", enum: serviceNames },
+              description: "The service(s) the customer wants.",
+            },
+            booking_type: {
+              type: "string",
+              enum: ["on_site", "house_call"],
+            },
           },
-          services: {
-            type: "array",
-            items: { type: "string", enum: serviceNames },
-            description: "The service(s) the customer wants.",
-          },
-          booking_type: {
-            type: "string",
-            enum: ["on_site", "house_call"],
-          },
+          required: ["date", "services", "booking_type"],
         },
-        required: ["date", "services", "booking_type"],
       },
     },
-  },
-  {
-    type: "function",
-    function: {
-      name: "create_booking",
-      description:
-        "Hold an appointment slot for the customer. Call only after the customer has confirmed the summary. The slot is held until payment.",
-      parameters: {
-        type: "object",
-        properties: {
-          date: { type: "string", description: "YYYY-MM-DD" },
-          time: {
-            type: "string",
-            description:
-              "24-hour HH:MM, must be a time returned by check_availability.",
+    {
+      type: "function",
+      function: {
+        name: "create_booking",
+        description:
+          "Hold an appointment slot for the customer. Call only after the customer has confirmed the summary. The slot is held until payment.",
+        parameters: {
+          type: "object",
+          properties: {
+            date: { type: "string", description: "YYYY-MM-DD" },
+            time: {
+              type: "string",
+              description:
+                "24-hour HH:MM, must be a time returned by check_availability.",
+            },
+            services: {
+              type: "array",
+              items: { type: "string", enum: serviceNames },
+            },
+            booking_type: { type: "string", enum: ["on_site", "house_call"] },
+            customer_name: { type: "string" },
+            address: {
+              type: "string",
+              description: "Customer's area/address. Required for house calls.",
+            },
           },
-          services: {
-            type: "array",
-            items: { type: "string", enum: serviceNames },
-          },
-          booking_type: { type: "string", enum: ["on_site", "house_call"] },
-          customer_name: { type: "string" },
-          address: {
-            type: "string",
-            description: "Customer's area/address. Required for house calls.",
-          },
+          required: [
+            "date",
+            "time",
+            "services",
+            "booking_type",
+            "customer_name",
+          ],
         },
-        required: ["date", "time", "services", "booking_type", "customer_name"],
       },
     },
-  },
-];
+  ];
+}
 
-// ctx.phone is the customer's WhatsApp number, supplied by our server,
-// never by the model.
-export function executeTool(name, args, ctx) {
+// ctx = { business, businessId, customerId, phone } -- all supplied by
+// our server from the resolved webhook/session, NEVER by the model.
+export async function executeTool(name, args, ctx) {
   try {
     if (name === "check_availability") {
-      const { found, unknown } = resolveServices(args.services);
+      const { found, unknown } = resolveServices(ctx.business, args.services);
       if (unknown.length || !found.length) {
         return {
           ok: false,
@@ -85,7 +94,8 @@ export function executeTool(name, args, ctx) {
         (sum, s) => sum + s.durationMinutes,
         0,
       );
-      return getAvailableSlots({
+      return await getAvailableSlots({
+        business: ctx.business,
         date: args.date,
         durationMinutes,
         type: args.booking_type,
@@ -93,7 +103,9 @@ export function executeTool(name, args, ctx) {
     }
 
     if (name === "create_booking") {
-      const result = createBooking({
+      const result = await createBooking({
+        business: ctx.business,
+        customerId: ctx.customerId,
         phone: ctx.phone,
         name: args.customer_name,
         serviceNames: args.services,
@@ -104,7 +116,6 @@ export function executeTool(name, args, ctx) {
       });
       if (!result.ok) return result;
       const b = result.booking;
-      // Return only what the model needs to talk about.
       return {
         ok: true,
         booking_id: b.id,
