@@ -1,13 +1,11 @@
 // src/services/tools.js
-// Tool schemas can no longer be built once at module load -- the valid
-// service names differ per business. buildToolDefinitions(business) is
-// called fresh for each request instead.
 import {
   getAvailableSlots,
   createBooking,
   resolveServices,
 } from "./bookings.js";
 import { escalateConversation } from "./escalation.js";
+import { initiatePaystackCharge } from "./payments.js";
 
 export function buildToolDefinitions(business) {
   const serviceNames = business.services.map((s) => s.name);
@@ -45,7 +43,7 @@ export function buildToolDefinitions(business) {
       function: {
         name: "create_booking",
         description:
-          "Hold an appointment slot for the customer. Call only after the customer has confirmed the summary. The slot is held until payment.",
+          "Hold an appointment slot for the customer and start their M-Pesa payment prompt. Call only after the customer has confirmed the summary. The slot is held until payment.",
         parameters: {
           type: "object",
           properties: {
@@ -103,8 +101,9 @@ export function buildToolDefinitions(business) {
   ];
 }
 
-// ctx = { business, businessId, customerId, phone } -- all supplied by
-// our server from the resolved webhook/session, NEVER by the model.
+// ctx = { business, businessId, customerId, conversationId, phone } --
+// all supplied by our server from the resolved webhook/session, NEVER
+// by the model.
 export async function executeTool(name, args, ctx) {
   try {
     if (name === "check_availability") {
@@ -141,6 +140,24 @@ export async function executeTool(name, args, ctx) {
       });
       if (!result.ok) return result;
       const b = result.booking;
+
+      // Fire the M-Pesa STK push immediately so the customer gets the
+      // prompt on their phone while the conversation is still fresh.
+      // We don't fail the booking if this call itself errors (e.g. a
+      // Paystack outage) -- the hold still exists, the customer can be
+      // retried, and the error is logged for us to notice.
+      const charge = await initiatePaystackCharge({
+        booking: b,
+        business: ctx.business,
+        phone: ctx.phone,
+      });
+      if (!charge.ok) {
+        console.error(
+          `Could not start payment for booking ${b.id}:`,
+          charge.error,
+        );
+      }
+
       return {
         ok: true,
         booking_id: b.id,
@@ -150,6 +167,7 @@ export async function executeTool(name, args, ctx) {
         time: b.time,
         total: `${b.currency} ${b.totalPrice}`,
         held_until: b.holdExpiresAt,
+        payment_prompt_sent: charge.ok,
         status: "held_awaiting_payment",
       };
     }
