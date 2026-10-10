@@ -30,6 +30,8 @@ model Business {
   conversations Conversation[]
   bookings      Booking[]
   whatsapp      WhatsAppAccount?
+
+  ownerPhone String?
 }
 
 model WhatsAppAccount {
@@ -78,6 +80,9 @@ model Conversation {
   updatedAt  DateTime @updatedAt
 
   messages Message[]
+
+  needsHuman Boolean @default(false)
+  escalatedAt DateTime?
 
   @@unique([businessId, customerId])
 }

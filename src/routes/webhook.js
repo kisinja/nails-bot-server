@@ -63,6 +63,13 @@ router.post("/webhook", async (req, res) => {
     );
 
     const reply = await getGroqReply(business, fromNumber, messageText);
+    if (reply === null) {
+      console.log(
+        `Skipping auto-reply to ${fromNumber} -- conversation is escalated.`,
+      );
+      return;
+    }
+    
     console.log(`Groq reply [${business.name}]: ${reply}`);
 
     await sendWhatsAppMessage({

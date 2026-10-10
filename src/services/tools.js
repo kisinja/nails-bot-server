@@ -7,6 +7,7 @@ import {
   createBooking,
   resolveServices,
 } from "./bookings.js";
+import { escalateConversation } from "./escalation.js";
 
 export function buildToolDefinitions(business) {
   const serviceNames = business.services.map((s) => s.name);
@@ -75,6 +76,30 @@ export function buildToolDefinitions(business) {
         },
       },
     },
+    {
+      type: "function",
+      function: {
+        name: "escalate_to_human",
+        description:
+          "Hand this conversation off to a human team member. Call this when the customer is upset, asks for a discount or something outside policy, or the request stays unclear after one clarifying question. After calling this, tell the customer a team member will follow up shortly and stop trying to resolve it yourself.",
+        parameters: {
+          type: "object",
+          properties: {
+            reason: {
+              type: "string",
+              description:
+                "Short reason, e.g. 'customer upset about a missed appointment', 'asked for a discount', 'request unclear after clarifying'.",
+            },
+            summary: {
+              type: "string",
+              description:
+                "One or two sentences summarizing what the customer needs, for the team member picking this up.",
+            },
+          },
+          required: ["reason"],
+        },
+      },
+    },
   ];
 }
 
@@ -127,6 +152,17 @@ export async function executeTool(name, args, ctx) {
         held_until: b.holdExpiresAt,
         status: "held_awaiting_payment",
       };
+    }
+
+    if (name === "escalate_to_human") {
+      await escalateConversation({
+        business: ctx.business,
+        conversationId: ctx.conversationId,
+        customerPhone: ctx.phone,
+        reason: args.reason,
+        summary: args.summary,
+      });
+      return { ok: true, escalated: true };
     }
 
     return { ok: false, error: `Unknown tool: ${name}` };

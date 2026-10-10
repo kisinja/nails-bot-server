@@ -8,6 +8,7 @@ import {
   getConversationHistory,
   appendMessage,
 } from "./customers.js";
+import { isEscalated } from "./escalation.js";
 
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 
@@ -40,6 +41,13 @@ export async function getGroqReply(business, fromNumber, userMessage) {
 
   await appendMessage(conversation.id, "user", userMessage);
 
+  if (await isEscalated(conversation.id)) {
+    console.log(
+      `Conversation ${conversation.id} is escalated -- skipping AI reply.`,
+    );
+    return null;
+  }
+
   const history = await getConversationHistory(conversation.id, 16);
   const tools = buildToolDefinitions(business);
 
@@ -52,6 +60,7 @@ export async function getGroqReply(business, fromNumber, userMessage) {
     business,
     businessId: business.id,
     customerId: customer.id,
+    conversationId: conversation.id,
     phone: fromNumber,
   };
 
