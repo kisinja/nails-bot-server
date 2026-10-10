@@ -5,6 +5,11 @@
 // included) into the system prompt text sent to Groq.
 import { nairobiNow, toHHMM, addDays, formatDate } from "../utils/time.js";
 
+// Kept short on purpose -- the full prompt (services + calendar) is
+// re-sent on every single message, and a longer calendar burns real
+// TPM budget on Groq's free tier for no benefit most customers need.
+const CALENDAR_DAYS_AHEAD = 7;
+
 export function buildSystemPrompt(business) {
   const now = nairobiNow();
   const today = now.date;
@@ -18,7 +23,7 @@ export function buildSystemPrompt(business) {
 
   // Models are unreliable at working out weekdays from dates, so we do
   // it in code and hand them a ready-made calendar.
-  const calendar = Array.from({ length: 14 }, (_, i) => {
+  const calendar = Array.from({ length: CALENDAR_DAYS_AHEAD }, (_, i) => {
     const date = addDays(today, i);
     const tag = i === 0 ? " <- today" : i === 1 ? " <- tomorrow" : "";
     return `- ${formatDate(date)} = ${date}${tag}`;
@@ -39,9 +44,11 @@ ${serviceList}
 - Always write prices as ${business.currency}.
 
 CURRENT DATE AND TIME: ${formatDate(today)}, ${toHHMM(now.minutes)} ${business.timezone} time.
-Calendar for the next 14 days (use this to convert "tomorrow",
+Calendar for the next ${CALENDAR_DAYS_AHEAD} days (use this to convert "tomorrow",
 "Saturday", "next Friday" into exact dates, and state the date back to
-the customer):
+the customer). If a customer asks about a date beyond this list, work
+out the weekday yourself from today's date and confirm it with them
+before using check_availability:
 ${calendar}
 
 BOOKING FLOW
