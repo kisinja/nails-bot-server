@@ -9,6 +9,7 @@ const PAYSTACK_BASE_URL = "https://api.paystack.co";
 // when the charge succeeds or fails, which is what actually confirms
 // the booking. This function only *starts* the charge.
 export async function initiatePaystackCharge({ booking, business, phone }) {
+    const chargePhone = process.env.PAYSTACK_TEST_MODE === "true" ? '254710000000' : phone;
   try {
     const response = await axios.post(
       `${PAYSTACK_BASE_URL}/charge`,

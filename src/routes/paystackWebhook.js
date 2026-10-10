@@ -68,3 +68,23 @@ router.post("/webhook/paystack", async (req, res) => {
 });
 
 export default router;
+
+
+/* 
+
+    curl https://api.paystack.co/charge \
+  -H "Authorization: Bearer sk_test_2aa71e46aae809b0a6fd9afc236a8b9f6a19657b" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "254710000000@customers.geteljika.co.ke",
+    "amount": 150000,
+    "currency": "KES",
+    "mobile_money": {
+      "phone": "+254710000000",
+      "provider": "mpesa"
+    },
+    "reference": "test-ref-001",
+    "metadata": { "businessId": "glow-nails-seed", "bookingId": "test-booking-001" }
+  }'
+
+*/
