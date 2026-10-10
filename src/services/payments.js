@@ -13,7 +13,7 @@ const PAYSTACK_BASE_URL = "https://api.paystack.co";
 //
 // *** REMOVE or set PAYSTACK_TEST_MODE=false before going live ***
 // (there's a Notion tracker item for this -- don't forget it).
-const PAYSTACK_TEST_PHONE = "254710000000";
+const PAYSTACK_TEST_PHONE = "+254710000000";
 
 // Fires an M-Pesa STK push via Paystack's Charge API for a held
 // booking. The customer approves the prompt on their own phone --
