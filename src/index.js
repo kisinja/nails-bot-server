@@ -2,11 +2,14 @@ import "dotenv/config";
 import express from "express";
 import morgan from "morgan";
 import webhookRouter from "./routes/webhook.js";
+import paystackWebhook from "./routes/paystackWebhook.js";
 import { prisma } from "./db.js";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+app.use("/webhook/paystack", express.raw({ type: "application/json" }));
+app.use(paystackWebhook);
 app.use(express.json());
 app.use(morgan("combined"));
 app.use(webhookRouter);

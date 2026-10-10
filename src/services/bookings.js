@@ -230,6 +230,7 @@ export async function confirmBooking({ businessId, bookingId }) {
   const updated = await prisma.booking.update({
     where: { id: bookingId },
     data: { status: "confirmed", confirmedAt: new Date() },
+    include: { customer: true },
   });
   return { ok: true, booking: updated };
 }
