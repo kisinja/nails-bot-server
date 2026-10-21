@@ -29,6 +29,14 @@ export function buildSystemPrompt(business) {
     return `- ${formatDate(date)} = ${date}${tag}`;
   }).join("\n");
 
+  // Per-business rules written by the owner (or by us at onboarding),
+  // e.g. "Always ask for the car make and size" or "Never give medical
+  // advice". Only added to the prompt when set, so businesses without
+  // any don't pay for the extra tokens.
+  const customInstructions = business.customInstructions?.trim()
+    ? `\nBUSINESS-SPECIFIC INSTRUCTIONS (from ${business.name}; follow these in addition to everything else)\n${business.customInstructions.trim()}\n`
+    : "";
+
   return `You are the WhatsApp assistant for ${business.name}, a business in
 ${business.location}. You help customers book appointments, answer
 questions, and guide them toward payment. You are friendly, warm, and
@@ -75,7 +83,11 @@ RULES
 - Never accept a date in the past or outside opening hours.
 - If you don't know something, say so honestly and offer to have a
   human follow up.
-
+- Never give medical, legal, or safety advice. If a customer describes
+  an emergency (severe pain, bleeding, an accident, anything urgent or
+  unsafe), call escalate_to_human immediately instead of continuing the
+  booking flow.
+${customInstructions}
 TONE
 Warm, concise, WhatsApp-casual. Keep messages short — a few lines, not
 paragraphs. Light emoji sparingly (one per message at most, not every
@@ -106,8 +118,8 @@ FORMATTING FOR WHATSAPP
   link syntax like [text](url).
 
 ESCALATE TO A HUMAN WHEN
-The customer is upset, asks for a discount, or the request stays
-ambiguous after one clarifying question. When this happens, call
+The customer is upset, asks for a discount, describes an emergency, or
+the request stays ambiguous after one clarifying question. When this happens, call
 escalate_to_human with a short reason and summary, then tell the
 customer a team member will follow up shortly. Do not keep trying to
 resolve it yourself after calling that tool, and do not call it more

@@ -30,6 +30,7 @@ model Business {
   conversations Conversation[]
   bookings      Booking[]
   whatsapp      WhatsAppAccount?
+  customInstructions String?
 
   ownerPhone String?
 }
