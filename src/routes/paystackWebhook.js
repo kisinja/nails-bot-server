@@ -69,7 +69,6 @@ router.post("/webhook/paystack", async (req, res) => {
 
 export default router;
 
-
 /* 
 
     curl https://api.paystack.co/charge \
